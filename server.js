@@ -3,7 +3,7 @@ const app = express()
 const bodyParser = require('body-parser')
 
 const expressValidator = require('express-validator')
-const { check, validationResult } = require('express-validator/check');
+const { query,check, validationResult } = require('express-validator/check');
 const cors = require('cors')
 
 const mongoose = require('mongoose')
@@ -27,23 +27,18 @@ app.get('/', (req, res) => {
 const Users = mongoose.model('Users', { name: String });
 var schema = new Schema({ username: String, description: String, duration: Number, date: { type: Date, default: Date.now } });
 schema.path('date').get(function(v) {
-  console.log("Inside convert date function")
   return v.toDateString();
 });
 const Exercises = mongoose.model('Exercises', schema);
 
-
-const { body } = require('express-validator/check')
 var validate = (method) => {
   switch (method) {
     case 'findExcercises':
       {
         return [
-
-          // body('userName', 'userName doesn\'t exists').exists(),
-          // body('email', 'Invalid email').exists().isEmail(),
-          // check('from').optional().isDate(),
-          // body('status').optional().isIn(['enabled', 'disabled'])
+          query('userId', 'Please provide userId').exists({checkFalsy:false}),
+          query('limit').optional().isInt(),
+          query(['from', 'to'],"Date should be in YYYY-MM-DD format").optional().isISO8601(),
         ]
       }
   }
@@ -72,14 +67,8 @@ app.route('/api/exercise/log/')
     //TODO: maybe there is a better way
     const keys = Object.keys(req.query);
     console.log("User Id=" + JSON.stringify(keys));
-    let userId = keys[0];
-    //TODO: test if needed
-    if (!(userId)) {
-      var err = new Error();
-      err.errors = [{ message: "Please provide userId" }];
-      throw err;
-    }
-
+    let userId = req.query.userId;
+    
     Users.findById(userId)
       .exec(function(err, result) {
         if (err) { throw err; }
@@ -89,7 +78,6 @@ app.route('/api/exercise/log/')
 
         let fromDate = req.query.from;
         if (fromDate) {
-          //TODO: 
           query.date = { "$gte": new Date(fromDate) };
         }
         let toDate = req.query.to;
@@ -104,6 +92,7 @@ app.route('/api/exercise/log/')
         exercises.exec(function(err, docs) {
           if (err) { throw err; }
           console.log(docs);
+          //TODO: change date format
           res.json({count:docs.length,log:docs});
         });
 
