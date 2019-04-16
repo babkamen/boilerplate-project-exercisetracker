@@ -3,7 +3,7 @@ const app = express()
 const bodyParser = require('body-parser')
 
 const expressValidator = require('express-validator')
-const { query,check,body, validationResult } = require('express-validator/check');
+const { query, check, body, validationResult } = require('express-validator/check');
 const cors = require('cors')
 
 const mongoose = require('mongoose')
@@ -29,31 +29,42 @@ var schema = new Schema({ username: String, description: String, duration: Numbe
 schema.path('date').get(function(v) {
   return v.toDateString();
 });
-const Exercises = mongoose.model('Exercises', schema);
+
+var Exercises = mongoose.model('Exercises', schema);
+// Exercises.statics.toJSON=()=>{
+//   return mongoose.Schema.statics.toJSON.call(this)+"car";
+// }
+const isMongoId = (value, { req }) => {
+  new mongoose.Types.ObjectId(value);
+  return true;
+};
+
+const userExists = (value) => {
+  return Users.count({ _id: value }).then((count) => {
+    if (count === 0) throw new Error("User doesn't exist");
+    return true;
+  });
+}
 
 var validate = (method) => {
   switch (method) {
     case 'findExcercises':
       {
         return [
-          query('userId', 'Please provide valid userId').exists().custom((value, { req }) => {
-          if(!mongoose.Types.ObjectId.isValid(value)){
-              throw new Error('Invalid id');
-          }
-          }),
+          query('userId', 'Please provide valid userId').exists({ checkFalsy: true }).custom(isMongoId).custom(userExists),
           query('limit').optional().isInt(),
-          query(['from', 'to'],"Date should be in YYYY-MM-DD format").optional().isISO8601(),
+          query(['from', 'to'], "Date should be in YYYY-MM-DD format").optional().isISO8601(),
         ]
-        break;
       }
     case 'createExcercise':
       {
         return [
-          body('userId', 'Please provide valid userId').exists().isMongoId()
+          body('description').exists({ checkFalsy: true }).isString(),
+          body('duration').exists({ checkFalsy: true }),
+          body('userId', 'Please provide valid userId').exists({ checkFalsy: true }).custom(isMongoId).custom(val => userExists(val))
         ]
-        break;
       }
-        
+
   }
 }
 
@@ -81,7 +92,7 @@ app.route('/api/exercise/log/')
     const keys = Object.keys(req.query);
     console.log("User Id=" + JSON.stringify(keys));
     let userId = req.query.userId;
-    
+
     Users.findById(userId)
       .exec(function(err, result) {
         if (err) { throw err; }
@@ -106,7 +117,7 @@ app.route('/api/exercise/log/')
           if (err) { throw err; }
           console.debug(docs);
           //TODO: change date format
-          res.json({count:docs.length,log:docs});
+          res.json({ count: docs.length, log: docs });
         });
 
       });
@@ -117,7 +128,7 @@ app.route('/api/exercise/new-user')
   .post(function(req, res) {
     //TODO: check if username is taken
     let u = new Users({ name: req.body.username });
-    console.log("debug","Saving new user " + req.body.username);
+    console.log("Saving new user " + req.body.username);
     u.save();
     res.json(u);
   });
@@ -127,7 +138,12 @@ app.route('/api/exercise/new-user')
 
 
 app.route('/api/exercise/add')
-  .post(validate("createExcercise"),function(req, res) {
+  .post(validate("createExcercise"), function(req, res) {
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(422).json({ errors: errors.array() });
+    }
 
     Users.findById(req.body.userId)
       .exec(function(err, result) {
