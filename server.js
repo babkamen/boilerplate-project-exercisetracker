@@ -3,7 +3,7 @@ const app = express()
 const bodyParser = require('body-parser')
 
 const expressValidator = require('express-validator')
-const { query,check, validationResult } = require('express-validator/check');
+const { query,check,body, validationResult } = require('express-validator/check');
 const cors = require('cors')
 
 const mongoose = require('mongoose')
@@ -36,11 +36,24 @@ var validate = (method) => {
     case 'findExcercises':
       {
         return [
-          query('userId', 'Please provide userId').exists({checkFalsy:false}),
+          query('userId', 'Please provide valid userId').exists().custom((value, { req }) => {
+          if(!mongoose.Types.ObjectId.isValid(value)){
+              throw new Error('Invalid id');
+          }
+          }),
           query('limit').optional().isInt(),
           query(['from', 'to'],"Date should be in YYYY-MM-DD format").optional().isISO8601(),
         ]
+        break;
       }
+    case 'createExcercise':
+      {
+        return [
+          body('userId', 'Please provide valid userId').exists().isMongoId()
+        ]
+        break;
+      }
+        
   }
 }
 
@@ -91,7 +104,7 @@ app.route('/api/exercise/log/')
         }
         exercises.exec(function(err, docs) {
           if (err) { throw err; }
-          console.log(docs);
+          console.debug(docs);
           //TODO: change date format
           res.json({count:docs.length,log:docs});
         });
@@ -104,7 +117,7 @@ app.route('/api/exercise/new-user')
   .post(function(req, res) {
     //TODO: check if username is taken
     let u = new Users({ name: req.body.username });
-    console.log("Saving new user " + req.body.username);
+    console.log("debug","Saving new user " + req.body.username);
     u.save();
     res.json(u);
   });
@@ -114,7 +127,7 @@ app.route('/api/exercise/new-user')
 
 
 app.route('/api/exercise/add')
-  .post(function(req, res) {
+  .post(validate("createExcercise"),function(req, res) {
 
     Users.findById(req.body.userId)
       .exec(function(err, result) {
