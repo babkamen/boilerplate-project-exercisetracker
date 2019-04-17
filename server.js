@@ -22,18 +22,20 @@ app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html')
 });
 
+const usersSchema = new Schema({ name: { type: String, index: { unique: true } } });
+const Users = mongoose.model('Users', usersSchema);
+var ExerciseSchema = new Schema({ username: String, description: String, duration: Number, date: { type: Date, default: Date.now } });
+
+ExerciseSchema.methods.toJSON = function() {
+  var exercise = this;
+  var exerciseObject = exercise.toObject();
+  exerciseObject.date = exerciseObject.date.toDateString();
+  return exerciseObject;
+};
+
+var Exercises = mongoose.model('Exercises', ExerciseSchema);
 
 
-const Users = mongoose.model('Users', { name: String });
-var schema = new Schema({ username: String, description: String, duration: Number, date: { type: Date, default: Date.now } });
-schema.path('date').get(function(v) {
-  return v.toDateString();
-});
-
-var Exercises = mongoose.model('Exercises', schema);
-// Exercises.statics.toJSON=()=>{
-//   return mongoose.Schema.statics.toJSON.call(this)+"car";
-// }
 const isMongoId = (value, { req }) => {
   new mongoose.Types.ObjectId(value);
   return true;
@@ -46,14 +48,43 @@ const userExists = (value) => {
   });
 }
 
+
+const userAlreadyExists = (value) => {
+  return Users.count({ name: value }).then((count) => {
+    if (count > 0) throw new Error("Username already taken");
+    return true;
+  });
+}
+const datesInOrder = (fromDate, { req }) => {
+  const toDate=req.body.to;
+  if (fromDate&&toDate&&new Date(fromDate).getTime() >= new Date(toDate).getTime()) {
+    throw new Error('start date must be before end date');
+  }
+  return true;
+}
+const dateIsNotInFuture=(v)=>{
+  if (v&&new Date(v).getTime() >= new Date().getTime()) {
+    throw new Error('Invalid date');
+  }
+  return true;
+}
+
+
 var validate = (method) => {
   switch (method) {
+    case 'createUser':
+      {
+        return [
+          body('username', 'Please provide valid username').exists({ checkFalsy: true }).custom(userAlreadyExists),
+        ]
+      }
     case 'findExcercises':
       {
         return [
           query('userId', 'Please provide valid userId').exists({ checkFalsy: true }).custom(isMongoId).custom(userExists),
           query('limit').optional().isInt(),
-          query(['from', 'to'], "Date should be in YYYY-MM-DD format").optional().isISO8601(),
+          query(['from', 'to'], "Date should be in YYYY-MM-DD format").optional().isISO8601().custom(dateIsNotInFuture),
+          query('from').custom(datesInOrder)
         ]
       }
     case 'createExcercise':
@@ -79,25 +110,21 @@ app.route('/api/exercise/users')
 
   });
 
+const processValidation = (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(422).json({ errors: errors.array() });
+  }
+}
 
 app.route('/api/exercise/log/')
   .get(validate("findExcercises"), (req, res) => {
-
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(422).json({ errors: errors.array() });
-    }
-
-    //TODO: maybe there is a better way
-    const keys = Object.keys(req.query);
-    console.log("User Id=" + JSON.stringify(keys));
+    processValidation(req, res);
     let userId = req.query.userId;
 
     Users.findById(userId)
       .exec(function(err, result) {
         if (err) { throw err; }
-
-
         var query = { username: result.name };
 
         let fromDate = req.query.from;
@@ -115,8 +142,6 @@ app.route('/api/exercise/log/')
         }
         exercises.exec(function(err, docs) {
           if (err) { throw err; }
-          console.debug(docs);
-          //TODO: change date format
           res.json({ count: docs.length, log: docs });
         });
 
@@ -125,8 +150,8 @@ app.route('/api/exercise/log/')
   });
 
 app.route('/api/exercise/new-user')
-  .post(function(req, res) {
-    //TODO: check if username is taken
+  .post(validate("createUser"), function(req, res) {
+    processValidation(req, res);
     let u = new Users({ name: req.body.username });
     console.log("Saving new user " + req.body.username);
     u.save();
@@ -156,7 +181,6 @@ app.route('/api/exercise/add')
         });
         let date = req.body.date;
         if (date) {
-          //TODO: add error handling
           ex.date = new Date(date);
         }
 
